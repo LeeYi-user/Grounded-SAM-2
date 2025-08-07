@@ -145,3 +145,7 @@ dmypy.json
 outputs/
 
 .idea/
+
+# Video files
+*.mp4
+extracted_frames*/

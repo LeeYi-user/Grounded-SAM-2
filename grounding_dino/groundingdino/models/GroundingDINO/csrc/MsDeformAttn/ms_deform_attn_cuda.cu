@@ -25,8 +25,8 @@
   #define IS_CUDA_TENSOR(x) x.device().is_cuda()
 #else
   // PyTorch 1.x
-  #define GET_TENSOR_TYPE(x) x.type()
-  #define IS_CUDA_TENSOR(x) x.type().is_cuda()
+  #define GET_TENSOR_TYPE(x) x.scalar_type()
+  #define IS_CUDA_TENSOR(x) x.is_cuda()
 #endif
 
 namespace groundingdino {

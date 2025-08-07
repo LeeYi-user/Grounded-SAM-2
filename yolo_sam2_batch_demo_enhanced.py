@@ -235,9 +235,21 @@ for img_path in tqdm(image_paths, desc="Processing images"):
 
         mask_annotator = sv.MaskAnnotator()
         original_annotated = mask_annotator.annotate(scene=original_annotated, detections=original_detections)
-        cv2.imwrite(os.path.join(img_output_dir, f"{img_name}_original_with_mask.jpg"), original_annotated)
+        cv2.imwrite(os.path.join(img_output_dir, f"{img_name}_original_with_original_mask.jpg"), original_annotated)
         
-        # Also save enhanced image with enhanced masks for mask comparison
+        # Save original image with enhanced masks (main result)
+        enhanced_mask_on_original_detections = sv.Detections(
+            xyxy=input_boxes,
+            mask=enhanced_masks.astype(bool),  # Using enhanced masks on original image
+            class_id=class_ids
+        )
+        
+        original_with_enhanced_mask = box_annotator.annotate(scene=original_img.copy(), detections=enhanced_mask_on_original_detections)
+        original_with_enhanced_mask = label_annotator.annotate(scene=original_with_enhanced_mask, detections=enhanced_mask_on_original_detections, labels=labels)
+        original_with_enhanced_mask = mask_annotator.annotate(scene=original_with_enhanced_mask, detections=enhanced_mask_on_original_detections)
+        cv2.imwrite(os.path.join(img_output_dir, f"{img_name}_original_with_enhanced_mask.jpg"), original_with_enhanced_mask)
+        
+        # Also save enhanced image with enhanced masks for comparison
         enhanced_detections = sv.Detections(
             xyxy=input_boxes,
             mask=enhanced_masks.astype(bool),  # Using enhanced masks
@@ -247,7 +259,7 @@ for img_path in tqdm(image_paths, desc="Processing images"):
         enhanced_with_annotations = box_annotator.annotate(scene=enhanced_image.copy(), detections=enhanced_detections)
         enhanced_with_annotations = label_annotator.annotate(scene=enhanced_with_annotations, detections=enhanced_detections, labels=labels)
         enhanced_with_mask = mask_annotator.annotate(scene=enhanced_with_annotations, detections=enhanced_detections)
-        cv2.imwrite(os.path.join(img_output_dir, f"{img_name}_enhanced_with_mask.jpg"), enhanced_with_mask)
+        cv2.imwrite(os.path.join(img_output_dir, f"{img_name}_enhanced_with_enhanced_mask.jpg"), enhanced_with_mask)
 
         """
         Dump the results in standard format and save as json files

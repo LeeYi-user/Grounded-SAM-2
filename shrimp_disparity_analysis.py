@@ -536,7 +536,7 @@ class ShrimpDisparityAnalyzer:
             right_points (tuple): 右影像點座標 (x_coords, y_coords)
             
         Returns:
-            tuple: (disparities, valid_mask, debug_info) 視差值、有效掩碼和調試資訊
+            tuple: (disparities, debug_info) 視差值和調試資訊
         """
         left_x, left_y = left_points
         right_x, right_y = right_points
@@ -551,7 +551,7 @@ class ShrimpDisparityAnalyzer:
         # 計算水平視差 (假設是校正過的立體圖像對)
         disparities = left_x - right_x
         
-        # 檢查y座標差異（應該很小）
+        # 檢查y座標差異（僅作為資訊顯示，不影響有效性判斷）
         y_diff = np.abs(left_y - right_y)
         
         # 調試資訊
@@ -563,26 +563,41 @@ class ShrimpDisparityAnalyzer:
             'disparity_range': (float(np.min(disparities)), float(np.max(disparities))),
             'y_diff_range': (float(np.min(y_diff)), float(np.max(y_diff))),
             'y_diff_mean': float(np.mean(y_diff)),
-            'y_diff_std': float(np.std(y_diff))
+            'y_diff_std': float(np.std(y_diff)),
+            'y_threshold_removed': True  # 標記已移除Y閾值限制
         }
         
-        # 放寬y座標差異的閾值，因為可能是不同時間或角度的圖像
-        # 先嘗試較寬鬆的閾值
-        max_y_diff = max(50, np.mean(y_diff) + 2 * np.std(y_diff))  # 動態調整閾值
-        valid_mask = y_diff < max_y_diff
+        # 移除Y座標閾值限制 - 接受所有通過t參數採樣的對應點
+        # 理由：
+        # 1. 已經通過NCC確保了物體匹配的正確性
+        # 2. 已經通過t參數確保了解剖學對應關係
+        # 3. Y座標差異是預期的（蝦子彎曲、時間差、未校正等因素）
+        # 4. 視差計算只依賴X座標，Y差異不影響結果
         
-        print(f"    調試資訊:")
-        print(f"      左X範圍: {debug_info['left_x_range']}")
-        print(f"      左Y範圍: {debug_info['left_y_range']}")
-        print(f"      右X範圍: {debug_info['right_x_range']}")
-        print(f"      右Y範圍: {debug_info['right_y_range']}")
-        print(f"      視差範圍: {debug_info['disparity_range']}")
-        print(f"      Y差異範圍: {debug_info['y_diff_range']}")
-        print(f"      Y差異平均: {debug_info['y_diff_mean']:.2f} ± {debug_info['y_diff_std']:.2f}")
-        print(f"      使用的Y差異閾值: {max_y_diff:.2f}")
-        print(f"      有效點數: {np.sum(valid_mask)}/{len(valid_mask)}")
+        print(f"    === 視差計算詳細過程 ===")
+        print(f"    採樣點數: {min_points}")
+        print(f"    左影像x範圍: [{np.min(left_x):.1f}, {np.max(left_x):.1f}]")
+        print(f"    右影像x範圍: [{np.min(right_x):.1f}, {np.max(right_x):.1f}]")
+        print(f"    視差範圍: [{np.min(disparities):.1f}, {np.max(disparities):.1f}]")
+        print(f"    左影像y範圍: [{np.min(left_y):.1f}, {np.max(left_y):.1f}]")
+        print(f"    右影像y範圍: [{np.min(right_y):.1f}, {np.max(right_y):.1f}]")
+        print(f"    y座標差異範圍: [{np.min(y_diff):.1f}, {np.max(y_diff):.1f}]")
+        print(f"    y座標差異統計: 平均={np.mean(y_diff):.2f} ± {np.std(y_diff):.2f}")
         
-        return disparities, valid_mask, debug_info
+        # 計算視差統計
+        print(f"    視差統計: 平均={np.mean(disparities):.2f} ± {np.std(disparities):.2f}")
+        print(f"    視差範圍: [{np.min(disparities):.1f}, {np.max(disparities):.1f}]")
+        
+        # 分析視差的一致性
+        disparity_std = np.std(disparities)
+        if disparity_std < 5:
+            print(f"    視差一致性: 良好 (標準差={disparity_std:.2f} < 5)")
+        elif disparity_std < 15:
+            print(f"    視差一致性: 中等 (標準差={disparity_std:.2f})")
+        else:
+            print(f"    視差一致性: 變化較大 (標準差={disparity_std:.2f}) - 可能反映蝦子3D形狀")
+        
+        return disparities, debug_info
     
     def analyze_shrimp_disparity(self, matches, n_points=10):
         """
@@ -690,7 +705,7 @@ class ShrimpDisparityAnalyzer:
                 )
             
             # 計算視差
-            disparities, valid_mask, debug_info = self.calculate_disparity(
+            disparities, debug_info = self.calculate_disparity(
                 (left_sampled_x, left_sampled_y), 
                 (right_sampled_x, right_sampled_y)
             )
@@ -704,10 +719,8 @@ class ShrimpDisparityAnalyzer:
                 'left_sampled_points': (left_sampled_x, left_sampled_y),
                 'right_sampled_points': (right_sampled_x, right_sampled_y),
                 'disparities': disparities,
-                'valid_mask': valid_mask,
-                'valid_disparities': disparities[valid_mask],
-                'avg_disparity': np.mean(disparities[valid_mask]) if np.any(valid_mask) else 0,
-                'disparity_std': np.std(disparities[valid_mask]) if np.any(valid_mask) else 0,
+                'avg_disparity': np.mean(disparities),
+                'disparity_std': np.std(disparities),
                 'match_info': match,
                 'debug_info': debug_info
             }
@@ -715,9 +728,8 @@ class ShrimpDisparityAnalyzer:
             disparity_results.append(result)
             
             print(f"  ✓ 曲線類型: {best_curve_type}")
-            print(f"  ✓ 有效視差點數: {np.sum(valid_mask)}/{n_points}")
-            if np.any(valid_mask):
-                print(f"  ✓ 平均視差: {result['avg_disparity']:.2f} ± {result['disparity_std']:.2f} 像素")
+            print(f"  ✓ 採樣點數: {n_points}")
+            print(f"  ✓ 平均視差: {result['avg_disparity']:.2f} ± {result['disparity_std']:.2f} 像素")
         
         return disparity_results
     
@@ -789,9 +801,9 @@ class ShrimpDisparityAnalyzer:
                          label=f'Shrimp {i+1} ({result["best_curve_type"]})')
             
             # 準備視差統計資料
-            if len(result['valid_disparities']) > 0:
-                all_disparities.extend(result['valid_disparities'])
-                disparity_labels.extend([f'Shrimp {i+1}'] * len(result['valid_disparities']))
+            if len(result['disparities']) > 0:
+                all_disparities.extend(result['disparities'])
+                disparity_labels.extend([f'Shrimp {i+1}'] * len(result['disparities']))
         
         # 視差散點圖
         if all_disparities:
@@ -812,14 +824,14 @@ class ShrimpDisparityAnalyzer:
         ax_stats.axis('off')
         
         # 創建統計表格
-        table_data = [['Shrimp', 'Curve Type', 'Valid Points', 'Avg Disparity', 'Std Disparity', 'NCC Score']]
+        table_data = [['Shrimp', 'Curve Type', 'Sample Points', 'Avg Disparity', 'Std Disparity', 'NCC Score']]
         
         for i, result in enumerate(disparity_results):
             match = result['match_info']
             table_data.append([
                 f'Shrimp {i+1}',
                 result['best_curve_type'].capitalize(),
-                f"{np.sum(result['valid_mask'])}/{len(result['disparities'])}",
+                f"{len(result['disparities'])}",
                 f"{result['avg_disparity']:.2f}",
                 f"{result['disparity_std']:.2f}",
                 f"{match['ncc_score']:.3f}"
@@ -923,13 +935,12 @@ class ShrimpDisparityAnalyzer:
         # 視差分析圖
         ax5 = fig.add_subplot(gs[2, :])
         
-        if len(result['valid_disparities']) > 0:
+        if len(result['disparities']) > 0:
             point_indices = np.arange(len(result['disparities']))
             
-            # 繪製所有視差點
+            # 繪製所有視差點（全部視為有效）
             ax5.scatter(point_indices, result['disparities'], 
-                       c=['green' if v else 'red' for v in result['valid_mask']], 
-                       s=100, alpha=0.7, edgecolors='black')
+                       c='green', s=100, alpha=0.7, edgecolors='black')
             
             # 繪製平均視差線
             ax5.axhline(y=result['avg_disparity'], color='blue', linestyle='--', 
@@ -977,11 +988,9 @@ class ShrimpDisparityAnalyzer:
                 'left_bbox': match['left_bbox'],
                 'right_bbox': match['right_bbox'],
                 'sampling_points': len(result['disparities']),
-                'valid_points': int(np.sum(result['valid_mask'])),
                 'avg_disparity': float(result['avg_disparity']),
                 'disparity_std': float(result['disparity_std']),
                 'disparities': result['disparities'].tolist(),
-                'valid_mask': result['valid_mask'].tolist(),
                 'left_sampled_points': {
                     'x': result['left_sampled_points'][0].tolist(),
                     'y': result['left_sampled_points'][1].tolist()
@@ -1061,11 +1070,8 @@ class ShrimpDisparityAnalyzer:
                 print(f"蝦子 {i+1}:")
                 print(f"  - NCC分數: {result['match_info']['ncc_score']:.3f}")
                 print(f"  - 曲線類型: {result['best_curve_type']}")
-                print(f"  - 有效視差點: {np.sum(result['valid_mask'])}/{len(result['disparities'])}")
-                if np.any(result['valid_mask']):
-                    print(f"  - 平均視差: {result['avg_disparity']:.2f} ± {result['disparity_std']:.2f} 像素")
-                else:
-                    print(f"  - 平均視差: 無有效點")
+                print(f"  - 採樣點數: {len(result['disparities'])}")
+                print(f"  - 平均視差: {result['avg_disparity']:.2f} ± {result['disparity_std']:.2f} 像素")
             
             print(f"\n程式執行完成! 結果已儲存至: {output_dir}")
             

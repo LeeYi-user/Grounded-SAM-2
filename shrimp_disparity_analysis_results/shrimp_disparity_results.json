@@ -18,7 +18,6 @@
         624
       ],
       "sampling_points": 15,
-      "valid_points": 15,
       "avg_disparity": 671.0,
       "disparity_std": 16.664761795905925,
       "disparities": [
@@ -37,23 +36,6 @@
         690.2857142857142,
         694.1428571428571,
         698.0
-      ],
-      "valid_mask": [
-        true,
-        true,
-        true,
-        true,
-        true,
-        true,
-        true,
-        true,
-        true,
-        true,
-        true,
-        true,
-        true,
-        true,
-        true
       ],
       "left_sampled_points": {
         "x": [
@@ -145,9 +127,8 @@
         894
       ],
       "sampling_points": 15,
-      "valid_points": 14,
-      "avg_disparity": 686.6785714285714,
-      "disparity_std": 38.871599857868006,
+      "avg_disparity": 691.5,
+      "disparity_std": 41.661904489764815,
       "disparities": [
         759.0,
         749.3571428571429,
@@ -164,23 +145,6 @@
         643.2857142857143,
         633.6428571428571,
         624.0
-      ],
-      "valid_mask": [
-        false,
-        true,
-        true,
-        true,
-        true,
-        true,
-        true,
-        true,
-        true,
-        true,
-        true,
-        true,
-        true,
-        true,
-        true
       ],
       "left_sampled_points": {
         "x": [

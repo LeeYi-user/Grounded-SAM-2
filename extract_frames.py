@@ -63,8 +63,8 @@ def extract_frames(video_path, output_folder):
 
 def main():
     # Define paths
-    video_path = "assets/GX011920.MP4"
-    output_folder = "extracted_frames"
+    video_path = "assets/GX011934.MP4"
+    output_folder = "extracted_frames_left"
     
     # Check if video file exists
     if not os.path.exists(video_path):

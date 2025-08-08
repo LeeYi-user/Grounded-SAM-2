@@ -52,7 +52,7 @@ def underwater_enhancement(img):
 """
 Hyper parameters
 """
-IMG_DIR = "extracted_frames/"  # 處理整個資料夾
+IMG_DIR = "extracted_frames_left/"  # 處理整個資料夾
 SAM2_CHECKPOINT = "./checkpoints/sam2.1_hiera_large.pt"
 SAM2_MODEL_CONFIG = "configs/sam2.1/sam2.1_hiera_l.yaml"
 YOLO_CHECKPOINT = "checkpoints/shrimp_674.pt"  # 使用 YOLOv7 模型
@@ -60,7 +60,7 @@ IMG_SIZE = 640
 CONF_THRES = 0.25
 IOU_THRES = 0.45
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-OUTPUT_DIR = Path("outputs/yolo_sam2_video_demo")
+OUTPUT_DIR = Path("outputs/yolo_sam2_video_demo_enhanced_left")
 DUMP_JSON_RESULTS = True
 
 # create output directory

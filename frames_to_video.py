@@ -13,8 +13,8 @@ from tqdm import tqdm
 
 def main():
     # 固定設定
-    input_dir = r"outputs\yolo_sam2_video_demo"
-    output_file = "yolo_sam2_video_output.mp4"
+    input_dir = r"outputs\yolo_sam2_video_demo_enhanced_left"
+    output_file = "yolo_sam2_video_output_enhanced_left.mp4"
     fps = 29.97
     
     print("=== YOLO SAM2 Frame 轉 MP4 影片工具 ===")

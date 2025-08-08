@@ -805,19 +805,22 @@ class ShrimpDisparityAnalyzer:
                 all_disparities.extend(result['disparities'])
                 disparity_labels.extend([f'Shrimp {i+1}'] * len(result['disparities']))
         
-        # 視差散點圖
+        # 視差線圖 - 將點連接起來
         if all_disparities:
             unique_labels = list(set(disparity_labels))
             for j, label in enumerate(unique_labels):
                 label_disparities = [d for d, l in zip(all_disparities, disparity_labels) if l == label]
-                ax_disparity.scatter([j] * len(label_disparities), label_disparities, 
-                                   c=colors[j], s=100, alpha=0.7, edgecolors='black')
+                point_indices = range(len(label_disparities))
+                # 使用線圖連接disparity點
+                ax_disparity.plot(point_indices, label_disparities, 'o-', 
+                                 color=colors[j], linewidth=2, markersize=8, 
+                                 alpha=0.8, markeredgecolor='black', 
+                                 label=f'Shrimp {j+1}')
             
-            ax_disparity.set_xlabel('Shrimp Index', fontsize=12)
+            ax_disparity.set_xlabel('Point Index', fontsize=12)
             ax_disparity.set_ylabel('Disparity (pixels)', fontsize=12)
-            ax_disparity.set_title('Disparity Analysis', fontsize=14, fontweight='bold')
-            ax_disparity.set_xticks(range(len(unique_labels)))
-            ax_disparity.set_xticklabels(unique_labels, rotation=45)
+            ax_disparity.set_title('Disparity Analysis - Connected Points', fontsize=14, fontweight='bold')
+            ax_disparity.legend(loc='best')
             ax_disparity.grid(True, alpha=0.3)
         
         # 統計表格
@@ -932,15 +935,17 @@ class ShrimpDisparityAnalyzer:
         ax4.legend()
         ax4.axis('off')
         
-        # 視差分析圖
+        # 視差分析圖 - 連接disparity點
         ax5 = fig.add_subplot(gs[2, :])
         
         if len(result['disparities']) > 0:
             point_indices = np.arange(len(result['disparities']))
             
-            # 繪製所有視差點（全部視為有效）
-            ax5.scatter(point_indices, result['disparities'], 
-                       c='green', s=100, alpha=0.7, edgecolors='black')
+            # 繪製連接的視差線和點（全部視為有效）
+            ax5.plot(point_indices, result['disparities'], 'o-', 
+                    color='green', linewidth=2, markersize=8, 
+                    alpha=0.8, markeredgecolor='black', 
+                    label='Disparity points')
             
             # 繪製平均視差線
             ax5.axhline(y=result['avg_disparity'], color='blue', linestyle='--', 
@@ -948,7 +953,7 @@ class ShrimpDisparityAnalyzer:
             
             ax5.set_xlabel('Point Index', fontsize=12)
             ax5.set_ylabel('Disparity (pixels)', fontsize=12)
-            ax5.set_title(f'Disparity Analysis - Shrimp {shrimp_idx+1}', fontsize=14, fontweight='bold')
+            ax5.set_title(f'Disparity Analysis - Shrimp {shrimp_idx+1} (Connected Points)', fontsize=14, fontweight='bold')
             ax5.legend()
             ax5.grid(True, alpha=0.3)
         else:
@@ -1091,7 +1096,7 @@ def main():
     output_dir = r"d:\Git\Grounded-SAM-2\shrimp_disparity_analysis_results"
     
     # 在曲線上採樣的點數
-    n_points = 15
+    n_points = 5
     
     # 創建分析器並執行分析
     analyzer = ShrimpDisparityAnalyzer(ncc_threshold=0.3)

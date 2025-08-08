@@ -1,0 +1,63 @@
+{
+  "total_matches": 2,
+  "matches": [
+    {
+      "left_object_idx": 0,
+      "right_object_idx": 2,
+      "ncc_score": 0.6649383902549744,
+      "left_bbox": [
+        1164,
+        357,
+        1620,
+        483
+      ],
+      "right_bbox": [
+        516,
+        492,
+        924,
+        624
+      ],
+      "left_class_name": "shrimp",
+      "right_class_name": "shrimp",
+      "left_score": [
+        0.97265625
+      ],
+      "right_score": [
+        0.953125
+      ],
+      "match_location": [
+        49,
+        0
+      ]
+    },
+    {
+      "left_object_idx": 1,
+      "right_object_idx": 1,
+      "ncc_score": 0.6750226616859436,
+      "left_bbox": [
+        738,
+        636,
+        1122,
+        768
+      ],
+      "right_bbox": [
+        16,
+        750,
+        504,
+        894
+      ],
+      "left_class_name": "shrimp",
+      "right_class_name": "shrimp",
+      "left_score": [
+        0.8671875
+      ],
+      "right_score": [
+        0.88671875
+      ],
+      "match_location": [
+        59,
+        12
+      ]
+    }
+  ]
+}

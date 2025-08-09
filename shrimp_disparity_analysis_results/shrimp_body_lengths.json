@@ -1,0 +1,26 @@
+{
+  "source": "shrimp_disparity_analysis_results/shrimp_disparity_results.json",
+  "baseline_cm": 25.0,
+  "results": [
+    {
+      "shrimp_id": 1,
+      "segment_lengths_cm": [
+        4.7425117690395036,
+        4.6383229288352865,
+        4.538567544343739,
+        4.442970546602488
+      ],
+      "total_length_cm": 18.362372788821016
+    },
+    {
+      "shrimp_id": 2,
+      "segment_lengths_cm": [
+        5.244209461108892,
+        5.574181617761226,
+        5.943961020620263,
+        6.360794865063952
+      ],
+      "total_length_cm": 23.12314696455433
+    }
+  ]
+}

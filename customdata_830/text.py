@@ -1,10 +1,10 @@
 import glob
 
 # 存放圖片的路徑
-train_image_path = r"D:/yolov7/yolov7-main/customdata/images/train/"
-valid_image_path = r"D:/yolov7/yolov7-main/customdata/images/valid/"
+train_image_path = r"D:/Git/Grounded-SAM-2/customdata_830/images/train/"
+valid_image_path = r"D:/Git/Grounded-SAM-2/customdata_830/images/valid/"
 # 生成的txt的路徑
-txt_path = r"D:/yolov7/yolov7-main/customdata/"
+txt_path = r"D:/Git/Grounded-SAM-2/customdata_830/"
 
 def generate_train_and_val(image_path, txt_file):
     with open(txt_file, 'w') as tf:  # 修正引號

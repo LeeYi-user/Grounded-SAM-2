@@ -548,8 +548,8 @@ class ShrimpDisparityAnalyzer:
         right_x = right_x[:min_points]
         right_y = right_y[:min_points]
         
-        # 計算水平視差 (假設是校正過的立體圖像對)
-        disparities = left_x - right_x
+        # 計算視差 (假設是校正過的立體圖像對)
+        disparities = np.sqrt((left_x - right_x)**2 + (left_y - right_y)**2)
         
         # 檢查y座標差異（僅作為資訊顯示，不影響有效性判斷）
         y_diff = np.abs(left_y - right_y)

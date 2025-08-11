@@ -25,13 +25,14 @@ def compute_lengths_for_shrimp(entry: Dict[str, Any], baseline_cm: float = 25.0)
     where
     - c = |a - b|, a = depth(disp2), b = depth(disp1)
     - length = r * baseline / max(disp1, disp2)
-      r = |x[i+1] - x[i]| in pixels (left image x-axis distance)
+      r = sqrt(|x[i+1] - x[i]|^2 + |y[i+1] - y[i]|^2) in pixels (left image Euclidean distance)
     """
     disparities: List[float] = entry.get("disparities", [])
     left_pts = entry.get("left_sampled_points", {})
     left_x: List[float] = left_pts.get("x", [])
+    left_y: List[float] = left_pts.get("y", [])
 
-    n = min(len(disparities), len(left_x))
+    n = min(len(disparities), len(left_x), len(left_y))
     if n < 2:
         return {
             "shrimp_id": entry.get("shrimp_id"),
@@ -50,8 +51,8 @@ def compute_lengths_for_shrimp(entry: Dict[str, Any], baseline_cm: float = 25.0)
         b = depth_from_disparity(disp1, baseline_cm=baseline_cm)
         c = abs(a - b)
 
-        # horizontal distance along x (cm)
-        r_px = abs(left_x[i + 1] - left_x[i])
+        # Euclidean distance along x and y (cm)
+        r_px = math.hypot(abs(left_x[i + 1] - left_x[i]), abs(left_y[i + 1] - left_y[i]))
         max_disp = max(disp1, disp2)
         if max_disp <= 0:
             raise ValueError("Encountered non-positive disparity when computing length.")

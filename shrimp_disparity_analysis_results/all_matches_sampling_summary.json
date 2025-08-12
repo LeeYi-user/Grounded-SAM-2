@@ -3,7 +3,7 @@
   "matches": [
     {
       "match_index": 1,
-      "ncc_score": 0.5408552885055542,
+      "ncc_score": 0.6649383902549744,
       "curve_type": "cubic",
       "left_curve_params": [
         -6.442683646876327e-06,
@@ -81,7 +81,7 @@
     },
     {
       "match_index": 2,
-      "ncc_score": 0.6897217631340027,
+      "ncc_score": 0.6750226616859436,
       "curve_type": "cubic",
       "left_curve_params": [
         8.755822251219298e-06,

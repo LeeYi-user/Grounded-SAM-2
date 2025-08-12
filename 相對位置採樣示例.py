@@ -89,56 +89,26 @@ ensure_chinese_font()
 plt.rcParams['font.sans-serif'] = ['Microsoft YaHei', 'SimHei', 'DejaVu Sans', 'Arial Unicode MS']
 plt.rcParams['axes.unicode_minus'] = False
 
-def load_real_shrimp_data(json_path):
-    """
-    載入真實蝦子資料
-    
-    Args:
-        json_path (str): JSON檔案路徑
-        
-    Returns:
-        tuple: (image, shrimp_masks, shrimp_data)
-    """
-    # 讀取JSON檔案
+def decode_rle_to_mask(rle_data):
+    """解碼 RLE 取得二值遮罩 (與 object_matching_ncc 相同)."""
+    return mask_utils.decode({'size': rle_data['size'], 'counts': rle_data['counts']})
+
+def load_image_and_shrimp_annotations(json_path):
+    """載入圖像與蝦子 annotations (沿用 object_matching_ncc 的流程風格)."""
     with open(json_path, 'r', encoding='utf-8') as f:
         data = json.load(f)
-    
-    # 取得圖像路徑
-    image_path = data['image_path']
-    image_path = image_path.replace('\\', os.sep)
+    image_path = data['image_path'].replace('\\', os.sep)
     root_dir = r"d:\Git\Grounded-SAM-2"
-    full_image_path = os.path.join(root_dir, image_path)
-    full_image_path = os.path.normpath(full_image_path)
-    
+    full_image_path = os.path.normpath(os.path.join(root_dir, image_path))
     print(f"載入圖像: {full_image_path}")
-    
-    # 載入圖像
     image = cv2.imread(full_image_path)
     if image is None:
         print(f"警告: 無法載入圖像: {full_image_path}")
-        return None, [], []
-    
-    # 轉換為RGB格式
+        return None, []
     image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    
-    # 過濾出蝦子標註
+    # 僅保留蝦子
     shrimp_annotations = [ann for ann in data['annotations'] if 'shrimp' in ann['class_name'].lower()]
-    
-    shrimp_masks = []
-    shrimp_data = []
-    
-    for ann in shrimp_annotations:
-        # 解碼遮罩
-        if 'segmentation' in ann and ann['segmentation']:
-            rle_data = ann['segmentation']
-            mask = mask_utils.decode({
-                'size': rle_data['size'],
-                'counts': rle_data['counts']
-            })
-            shrimp_masks.append(mask)
-            shrimp_data.append(ann)
-    
-    return image_rgb, shrimp_masks, shrimp_data
+    return image_rgb, shrimp_annotations
 
 def get_mask_points(mask):
     """
@@ -153,30 +123,20 @@ def get_mask_points(mask):
     y_coords, x_coords = np.where(mask > 0)
     return x_coords, y_coords
 
-def extract_object_roi(image, mask):
-    """
-    從遮罩中提取物體的ROI (Region of Interest)
-    
-    Args:
-        image (numpy.ndarray): 輸入影像
-        mask (numpy.ndarray): 二進制遮罩
-        
-    Returns:
-        tuple: (roi, bbox) ROI影像和邊界框
-    """
-    # 找到遮罩的邊界框
-    y_coords, x_coords = np.where(mask > 0)
-    if len(x_coords) == 0 or len(y_coords) == 0:
-        return None, None
-    
-    x_min, x_max = x_coords.min(), x_coords.max()
-    y_min, y_max = y_coords.min(), y_coords.max()
-    
-    # 提取ROI
-    roi = image[y_min:y_max+1, x_min:x_max+1]
-    bbox = (x_min, y_min, x_max - x_min + 1, y_max - y_min + 1)
-    
-    return roi, bbox
+def extract_object_roi(image, annotation):
+    """使用 annotation 提供的 bbox + decoded mask 建立 masked ROI (模仿 object_matching_ncc)."""
+    if 'segmentation' not in annotation or not annotation['segmentation']:
+        return None, None, None, None
+    full_mask = decode_rle_to_mask(annotation['segmentation'])
+    bbox = annotation['bbox']  # 假設為 [x1,y1,x2,y2]
+    x1, y1, x2, y2 = [int(v) for v in bbox]
+    h, w = image.shape[:2]
+    x1 = max(0, x1); y1 = max(0, y1); x2 = min(w, x2); y2 = min(h, y2)
+    roi_image = image[y1:y2, x1:x2]
+    roi_mask = full_mask[y1:y2, x1:x2]
+    masked_roi = roi_image.copy()
+    masked_roi[roi_mask == 0] = 0
+    return masked_roi, roi_mask, (x1, y1, x2, y2), full_mask
 
 def compute_ncc(template, search_region):
     """與 object_matching_ncc.py 保持一致的 NCC 計算函式。
@@ -231,70 +191,34 @@ def compute_ncc(template, search_region):
         print(f"    模板匹配異常: {e}")
         return 0.0, (0, 0)
 
-def find_matching_shrimps(left_masks, right_masks, left_image, right_image, ncc_threshold=0.3):
-    """
-    使用NCC匹配左右影像中的蝦子
-    
-    Args:
-        left_masks (list): 左影像蝦子遮罩列表
-        right_masks (list): 右影像蝦子遮罩列表
-        left_image (numpy.ndarray): 左影像
-        right_image (numpy.ndarray): 右影像
-        ncc_threshold (float): NCC匹配閾值
-        
-    Returns:
-        list: 匹配結果 [(left_mask, right_mask, ncc_score), ...]
-    """
+def find_matching_shrimps(left_annotations, right_annotations, left_image, right_image, ncc_threshold=0.3):
+    """依 object_matching_ncc 風格：對每個左蝦子找右側最佳 NCC (允許右側重複)."""
     matches = []
-    
-    print(f"尋找蝦子匹配: 左{len(left_masks)}隻, 右{len(right_masks)}隻")
-    
-    used_right_indices = set()  # 追蹤已被配對的右蝦子索引，確保一對一
-
-    for i, left_mask in enumerate(left_masks):
-        # 提取左蝦子ROI
-        left_roi, left_bbox = extract_object_roi(left_image, left_mask)
-        if left_roi is None:
+    print(f"尋找蝦子匹配: 左{len(left_annotations)}隻, 右{len(right_annotations)}隻")
+    for i, l_ann in enumerate(left_annotations):
+        l_roi, l_mask_roi, l_bbox, l_full_mask = extract_object_roi(left_image, l_ann)
+        if l_roi is None or l_roi.size == 0:
+            print(f"  跳過左蝦子 {i+1} ROI空")
             continue
-        
-        best_match = None
         best_ncc = -1
-        
-        # 在右影像中尋找最佳匹配
-        for j, right_mask in enumerate(right_masks):
-            if j in used_right_indices:
-                continue  # 已經被配對，跳過
-            # 提取右蝦子ROI
-            right_roi, right_bbox = extract_object_roi(right_image, right_mask)
-            if right_roi is None:
+        best_tuple = None
+        for j, r_ann in enumerate(right_annotations):
+            r_roi, r_mask_roi, r_bbox, r_full_mask = extract_object_roi(right_image, r_ann)
+            if r_roi is None or r_roi.size == 0:
                 continue
-            
-            # 計算NCC
             try:
-                ncc_score, match_loc = compute_ncc(left_roi, right_roi)
-                print(f"  左蝦子{i+1} vs 右蝦子{j+1}: NCC = {ncc_score:.3f}")
-                
-                if ncc_score > best_ncc and ncc_score > ncc_threshold:
-                    best_ncc = ncc_score
-                    best_match = (left_mask, right_mask, ncc_score)
-                    
+                ncc, loc = compute_ncc(l_roi, r_roi)
+                print(f"  左蝦子{i+1} vs 右蝦子{j+1}: NCC = {ncc:.3f}")
+                if ncc > best_ncc and ncc > ncc_threshold:
+                    best_ncc = ncc
+                    best_tuple = (l_full_mask, r_full_mask, ncc)
             except Exception as e:
-                print(f"  匹配計算錯誤: {e}")
-        
-        if best_match:
-            matches.append(best_match)
-            # 找到對應右索引 (從 right_masks 中尋找同一物件的引用位置)
-            right_index = None
-            for idx_r, rm in enumerate(right_masks):
-                if rm is best_match[1]:
-                    right_index = idx_r
-                    break
-            if right_index is not None:
-                used_right_indices.add(right_index)
-            print(f"  ✓ 找到匹配: 左蝦子{i+1} → 右蝦子{(right_index+1) if right_index is not None else '?'} (NCC = {best_ncc:.3f})")
+                print(f"    NCC錯誤: {e}")
+        if best_tuple:
+            matches.append(best_tuple)
+            print(f"  ✓ 匹配成功: 左蝦子{i+1} (NCC={best_ncc:.3f})")
         else:
-            print(f"  ✗ 未找到匹配: 左蝦子{i+1}")
-    
+            print(f"  ✗ 未匹配: 左蝦子{i+1}")
     return matches
 
 def fit_quadratic_curve(x_points, y_points):
@@ -397,14 +321,26 @@ def demonstrate_real_data_sampling():
     
     # 載入左右影像資料
     print("1. 載入左影像蝦子資料...")
-    left_image, left_masks, left_data = load_real_shrimp_data(left_json_path)
+    left_image, left_annotations = load_image_and_shrimp_annotations(left_json_path)
+    left_masks = []
+    for ann in left_annotations:
+        try:
+            left_masks.append(decode_rle_to_mask(ann['segmentation']))
+        except Exception:
+            pass
     if left_image is None:
         print("無法載入左影像，使用模擬資料...")
         demonstrate_simulated_sampling()
         return
     
     print("2. 載入右影像蝦子資料...")
-    right_image, right_masks, right_data = load_real_shrimp_data(right_json_path)
+    right_image, right_annotations = load_image_and_shrimp_annotations(right_json_path)
+    right_masks = []
+    for ann in right_annotations:
+        try:
+            right_masks.append(decode_rle_to_mask(ann['segmentation']))
+        except Exception:
+            pass
     if right_image is None:
         print("無法載入右影像，使用模擬資料...")
         demonstrate_simulated_sampling()
@@ -420,7 +356,7 @@ def demonstrate_real_data_sampling():
     
     # 3. 進行蝦子匹配
     print("\n3. 進行蝦子匹配...")
-    matches = find_matching_shrimps(left_masks, right_masks, left_image, right_image)
+    matches = find_matching_shrimps(left_annotations, right_annotations, left_image, right_image)
     
     if len(matches) == 0:
         print("沒有找到匹配的蝦子對，使用第一隻蝦子進行示例...")
@@ -534,7 +470,7 @@ def demonstrate_real_data_sampling():
     for i, (t, lx, ly, rx, ry, d) in enumerate(zip(t_values, relative_left_x, relative_left_y, 
                                                    relative_right_x, relative_right_y, relative_disparities)):
         part = body_parts[i] if i < len(body_parts) else f"第{i+1}點"
-    print(f"{t:.2f}   ({lx:6.1f},{ly:6.1f})   ({rx:6.1f},{ry:6.1f})   {d:8.2f}   {part}")
+        print(f"{t:.2f}   ({lx:6.1f},{ly:6.1f})   ({rx:6.1f},{ry:6.1f})   {d:8.2f}   {part}")
     
     print(f"\n平均視差: {np.mean(relative_disparities):.1f} 像素 ← 正確！")
     print(f"視差標準差: {np.std(relative_disparities):.1f} 像素")

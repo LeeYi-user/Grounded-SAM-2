@@ -22,11 +22,14 @@ import os
 from pathlib import Path
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
-from scipy.optimize import minimize
-from sklearn.preprocessing import PolynomialFeatures
-from sklearn.linear_model import LinearRegression
 import warnings
 warnings.filterwarnings('ignore')
+
+# 新增：使用 regression_curve_analysis 的曲線計算實作
+from regression_curve_analysis import (
+    fit_optimal_curve as rc_fit_optimal_curve,
+    total_distance_to_curve as rc_total_distance_to_curve
+)
 
 # 解決中文顯示問題
 plt.rcParams['font.sans-serif'] = ['Microsoft YaHei', 'SimHei', 'DejaVu Sans', 'Arial Unicode MS']
@@ -285,128 +288,15 @@ class ShrimpDisparityAnalyzer:
     
     def total_distance_to_curve(self, params, x_points, y_points, curve_type='linear'):
         """
-        計算所有點到曲線的總距離
-        
-        Args:
-            params (array): 曲線參數
-            x_points (array): 點的 x 座標
-            y_points (array): 點的 y 座標
-            curve_type (str): 曲線類型 ('linear', 'quadratic', 'cubic')
-            
-        Returns:
-            float: 總距離
+        委派至 regression_curve_analysis.total_distance_to_curve
         """
-        if curve_type == 'linear':
-            # y = ax + b
-            a, b = params
-            # 點到直線 ax - y + b = 0 的距離
-            distances = np.abs(a * x_points - y_points + b) / np.sqrt(a**2 + 1)
-        
-        elif curve_type == 'quadratic':
-            # y = ax^2 + bx + c
-            a, b, c = params
-            curve_y = a * x_points**2 + b * x_points + c
-            distances = np.abs(y_points - curve_y)
-        
-        elif curve_type == 'cubic':
-            # y = ax^3 + bx^2 + cx + d
-            a, b, c, d = params
-            curve_y = a * x_points**3 + b * x_points**2 + c * x_points + d
-            distances = np.abs(y_points - curve_y)
-        
-        return np.sum(distances)
+        return rc_total_distance_to_curve(params, x_points, y_points, curve_type)
     
     def fit_optimal_curve(self, x_points, y_points, curve_type='quadratic'):
         """
-        擬合最佳迴歸曲線，最小化總距離
-        
-        Args:
-            x_points (array): 點的 x 座標
-            y_points (array): 點的 y 座標
-            curve_type (str): 曲線類型
-            
-        Returns:
-            array: 最佳曲線參數
+        委派至 regression_curve_analysis.fit_optimal_curve
         """
-        # 正規化座標以改善數值穩定性
-        x_min, x_max = x_points.min(), x_points.max()
-        y_min, y_max = y_points.min(), y_points.max()
-        
-        x_norm = (x_points - x_min) / (x_max - x_min) if x_max != x_min else x_points
-        y_norm = (y_points - y_min) / (y_max - y_min) if y_max != y_min else y_points
-        
-        # 使用最小二乘法作為初始猜測
-        if curve_type == 'linear':
-            poly_features = PolynomialFeatures(degree=1, include_bias=True)
-            initial_guess = [1.0, 0.0]
-        elif curve_type == 'quadratic':
-            poly_features = PolynomialFeatures(degree=2, include_bias=True)
-            initial_guess = [0.0, 1.0, 0.0]
-        elif curve_type == 'cubic':
-            poly_features = PolynomialFeatures(degree=3, include_bias=True)
-            initial_guess = [0.0, 0.0, 1.0, 0.0]
-        
-        # 使用最小二乘法獲得初始估計
-        try:
-            X_poly = poly_features.fit_transform(x_norm.reshape(-1, 1))
-            model = LinearRegression(fit_intercept=False)
-            model.fit(X_poly, y_norm)
-            
-            if curve_type == 'linear':
-                initial_guess = [model.coef_[1], model.coef_[0]]
-            elif curve_type == 'quadratic':
-                initial_guess = [model.coef_[2], model.coef_[1], model.coef_[0]]
-            elif curve_type == 'cubic':
-                initial_guess = [model.coef_[3], model.coef_[2], model.coef_[1], model.coef_[0]]
-        except:
-            pass  # 使用默認初始猜測
-        
-        # 最小化總距離
-        result = minimize(
-            self.total_distance_to_curve,
-            initial_guess,
-            args=(x_norm, y_norm, curve_type),
-            method='BFGS'
-        )
-        
-        # 將參數轉換回原始座標系
-        params_norm = result.x
-        
-        if curve_type == 'linear':
-            a_norm, b_norm = params_norm
-            if x_max != x_min and y_max != y_min:
-                a = a_norm * (y_max - y_min) / (x_max - x_min)
-                b = b_norm * (y_max - y_min) + y_min - a * x_min
-            else:
-                a, b = 0, np.mean(y_points)
-            params = [a, b]
-            
-        elif curve_type == 'quadratic':
-            a_norm, b_norm, c_norm = params_norm
-            if x_max != x_min and y_max != y_min:
-                scale_x = (x_max - x_min)
-                scale_y = (y_max - y_min)
-                a = a_norm * scale_y / (scale_x**2)
-                b = b_norm * scale_y / scale_x - 2 * a * x_min
-                c = c_norm * scale_y + y_min - a * x_min**2 - b * x_min
-            else:
-                a, b, c = 0, 0, np.mean(y_points)
-            params = [a, b, c]
-            
-        elif curve_type == 'cubic':
-            a_norm, b_norm, c_norm, d_norm = params_norm
-            if x_max != x_min and y_max != y_min:
-                scale_x = (x_max - x_min)
-                scale_y = (y_max - y_min)
-                a = a_norm * scale_y / (scale_x**3)
-                b = b_norm * scale_y / (scale_x**2) - 3 * a * x_min
-                c = c_norm * scale_y / scale_x - 3 * a * x_min**2 - 2 * b * x_min
-                d = d_norm * scale_y + y_min - a * x_min**3 - b * x_min**2 - c * x_min
-            else:
-                a, b, c, d = 0, 0, 0, np.mean(y_points)
-            params = [a, b, c, d]
-        
-        return np.array(params)
+        return rc_fit_optimal_curve(x_points, y_points, curve_type)
     
     def find_corresponding_points_on_curves(self, left_params, right_params, curve_type, n_points=10, left_mask=None, right_mask=None):
         """
@@ -602,20 +492,12 @@ class ShrimpDisparityAnalyzer:
     def analyze_shrimp_disparity(self, matches, n_points=10):
         """
         分析蝦子視差
-        
-        Args:
-            matches (list): 匹配的蝦子列表
-            n_points (int): 在曲線上採樣的點數
-            
-        Returns:
-            list: 視差分析結果
         """
         disparity_results = []
         
         for i, match in enumerate(matches):
             print(f"\n分析蝦子匹配 {i+1}/{len(matches)}")
             
-            # 提取左右蝦子的遮罩點
             left_mask = match['left_full_mask']
             right_mask = match['right_full_mask']
             
@@ -626,110 +508,104 @@ class ShrimpDisparityAnalyzer:
                 print(f"  跳過: 蝦子 {i+1} 遮罩點為空")
                 continue
             
-            # 對左右蝦子分別計算最佳迴歸曲線
             print(f"  左蝦子點數: {len(left_x)}, 右蝦子點數: {len(right_x)}")
             
-            # 計算不同曲線類型的擬合效果
             curve_types = ['linear', 'quadratic', 'cubic']
             left_curves = {}
             right_curves = {}
             
+            # 擬合三種曲線並計算距離 (與 regression_curve_analysis 邏輯一致)
             for curve_type in curve_types:
                 try:
-                    # 左蝦子曲線
                     left_params = self.fit_optimal_curve(left_x, left_y, curve_type)
-                    left_distance = self.total_distance_to_curve(left_params, left_x, left_y, curve_type)
+                    left_total_dist = self.total_distance_to_curve(left_params, left_x, left_y, curve_type)
                     left_curves[curve_type] = {
                         'params': left_params,
-                        'distance': left_distance,
-                        'avg_distance': left_distance / len(left_x)
+                        'total_distance': left_total_dist,
+                        'avg_distance': left_total_dist / len(left_x)
                     }
-                    
-                    # 右蝦子曲線
+                except Exception as e:
+                    print(f"    左側 {curve_type} 擬合失敗: {e}")
+                    left_curves[curve_type] = None
+                
+                try:
                     right_params = self.fit_optimal_curve(right_x, right_y, curve_type)
-                    right_distance = self.total_distance_to_curve(right_params, right_x, right_y, curve_type)
+                    right_total_dist = self.total_distance_to_curve(right_params, right_x, right_y, curve_type)
                     right_curves[curve_type] = {
                         'params': right_params,
-                        'distance': right_distance,
-                        'avg_distance': right_distance / len(right_x)
+                        'total_distance': right_total_dist,
+                        'avg_distance': right_total_dist / len(right_x)
                     }
-                    
-                    print(f"    {curve_type}: 左平均距離={left_distance/len(left_x):.2f}, 右平均距離={right_distance/len(right_x):.2f}")
-                    
                 except Exception as e:
-                    print(f"    {curve_type} 擬合失敗: {e}")
-                    left_curves[curve_type] = None
+                    print(f"    右側 {curve_type} 擬合失敗: {e}")
                     right_curves[curve_type] = None
             
-            # 選擇最佳曲線類型 (使用二次曲線作為默認，因為蝦子通常是彎曲的)
-            best_curve_type = 'quadratic'
+            # 印出統計
+            for ct in curve_types:
+                lc = left_curves.get(ct)
+                rc = right_curves.get(ct)
+                if lc and rc:
+                    print(f"    {ct}: 左avg={lc['avg_distance']:.3f}, 右avg={rc['avg_distance']:.3f}, 總和={(lc['total_distance']+rc['total_distance']):.1f}")
+                else:
+                    print(f"    {ct}: (其中一側失敗)")
             
-            # 如果二次曲線擬合失敗，嘗試其他類型
-            if left_curves[best_curve_type] is None or right_curves[best_curve_type] is None:
-                for curve_type in curve_types:
-                    if left_curves[curve_type] is not None and right_curves[curve_type] is not None:
-                        best_curve_type = curve_type
-                        break
+            # 依「左右總距離」最小選擇最佳曲線
+            best_curve_type = None
+            best_sum = float('inf')
+            for ct in curve_types:
+                lc = left_curves.get(ct)
+                rc = right_curves.get(ct)
+                if lc and rc:
+                    sum_dist = lc['total_distance'] + rc['total_distance']
+                    if sum_dist < best_sum:
+                        best_sum = sum_dist
+                        best_curve_type = ct
             
-            if left_curves[best_curve_type] is None or right_curves[best_curve_type] is None:
-                print(f"  跳過: 蝦子 {i+1} 無法擬合任何曲線")
+            if best_curve_type is None:
+                print(f"  跳過: 蝦子 {i+1} 無法同時擬合任一曲線類型")
                 continue
             
-            # 使用新的對應點匹配方法
+            print(f"  ✓ 選擇最佳曲線: {best_curve_type} (左右總距離={best_sum:.1f})")
+            
+            # 採樣對應點
             try:
                 left_sampled_points, right_sampled_points = self.find_corresponding_points_on_curves(
-                    left_curves[best_curve_type]['params'], 
-                    right_curves[best_curve_type]['params'], 
-                    best_curve_type, 
+                    left_curves[best_curve_type]['params'],
+                    right_curves[best_curve_type]['params'],
+                    best_curve_type,
                     n_points,
                     left_mask,
                     right_mask
                 )
-                left_sampled_x, left_sampled_y = left_sampled_points
-                right_sampled_x, right_sampled_y = right_sampled_points
-                
-                print(f"    使用改進的對應點匹配方法")
-                
+                print("    使用遮罩範圍對應採樣")
             except Exception as e:
-                print(f"    對應點匹配失敗，使用原方法: {e}")
-                # 回到原來的方法：在曲線上採樣點
+                print(f"    對應採樣失敗，改用備援: {e}")
                 left_x_range = (left_x.min(), left_x.max())
                 right_x_range = (right_x.min(), right_x.max())
-                
-                left_sampled_x, left_sampled_y = self.sample_points_on_curve(
-                    left_curves[best_curve_type]['params'], left_x_range, n_points, best_curve_type
-                )
-                
-                right_sampled_x, right_sampled_y = self.sample_points_on_curve(
-                    right_curves[best_curve_type]['params'], right_x_range, n_points, best_curve_type
-                )
+                left_sampled_points = self.sample_points_on_curve(left_curves[best_curve_type]['params'], left_x_range, n_points, best_curve_type)
+                right_sampled_points = self.sample_points_on_curve(right_curves[best_curve_type]['params'], right_x_range, n_points, best_curve_type)
             
-            # 計算視差
             disparities, debug_info = self.calculate_disparity(
-                (left_sampled_x, left_sampled_y), 
-                (right_sampled_x, right_sampled_y)
+                left_sampled_points,
+                right_sampled_points
             )
             
-            # 儲存結果
             result = {
                 'match_idx': i,
                 'left_curves': left_curves,
                 'right_curves': right_curves,
                 'best_curve_type': best_curve_type,
-                'left_sampled_points': (left_sampled_x, left_sampled_y),
-                'right_sampled_points': (right_sampled_x, right_sampled_y),
+                'left_sampled_points': left_sampled_points,
+                'right_sampled_points': right_sampled_points,
                 'disparities': disparities,
-                'avg_disparity': np.mean(disparities),
-                'disparity_std': np.std(disparities),
+                'avg_disparity': float(np.mean(disparities)),
+                'disparity_std': float(np.std(disparities)),
                 'match_info': match,
                 'debug_info': debug_info
             }
-            
             disparity_results.append(result)
             
-            print(f"  ✓ 曲線類型: {best_curve_type}")
-            print(f"  ✓ 採樣點數: {n_points}")
-            print(f"  ✓ 平均視差: {result['avg_disparity']:.2f} ± {result['disparity_std']:.2f} 像素")
+            print(f"  ✓ 平均視差: {result['avg_disparity']:.2f} ± {result['disparity_std']:.2f}")
         
         return disparity_results
     

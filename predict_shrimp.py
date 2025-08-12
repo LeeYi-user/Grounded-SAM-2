@@ -20,7 +20,7 @@ def predict_shrimp_image():
     """
     # 設定參數
     weights = 'checkpoints/shrimp_674.pt'
-    source = r'customdata_830\images\vaild\00031.jpg'
+    source = r'extracted_frames_left\frame_015314.jpg'
     img_size = 640
     conf_thres = 0.25
     iou_thres = 0.45

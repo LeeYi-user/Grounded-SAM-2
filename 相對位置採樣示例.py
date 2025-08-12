@@ -12,6 +12,78 @@ from pycocotools import mask as mask_utils
 import os
 from pathlib import Path
 from scipy.optimize import minimize
+from regression_curve_analysis import (
+    fit_optimal_curve as rc_fit_optimal_curve,
+    total_distance_to_curve as rc_total_distance_to_curve
+)
+import matplotlib
+from matplotlib import font_manager
+
+# === 中文字型自動處理 (避免部分環境中文字無法顯示) ===
+def ensure_chinese_font():
+    """確保 Matplotlib 能顯示中文，嘗試動態載入常見中文字型。"""
+    # 已設定的 family 若已經有中文字支持則跳過
+    test_families = ["Microsoft YaHei", "SimHei", "Noto Sans CJK SC", "Noto Sans CJK TC", "TW-Kai", "PMingLiU", "Arial Unicode MS", "WenQuanYi Zen Hei", "PingFang TC", "PingFang SC", "Source Han Sans CN", "Source Han Sans TW"]
+    available = set(f.name for f in font_manager.fontManager.ttflist)
+    chosen = None
+    for fam in test_families:
+        if fam in available:
+            chosen = fam
+            break
+
+    # 若找不到，嘗試從 Windows 常見路徑加入
+    if not chosen:
+        win_font_candidates = [
+            ("Microsoft YaHei", r"C:\\Windows\\Fonts\\msyh.ttc"),
+            ("SimHei", r"C:\\Windows\\Fonts\\simhei.ttf"),
+            ("PMingLiU", r"C:\\Windows\\Fonts\\pmingliu.ttc"),
+            ("MingLiU", r"C:\\Windows\\Fonts\\mingliu.ttc")
+        ]
+        for fam, path in win_font_candidates:
+            if os.path.exists(path):
+                try:
+                    font_manager.fontManager.addfont(path)
+                    available = set(f.name for f in font_manager.fontManager.ttflist)
+                    if fam in available:
+                        chosen = fam
+                        break
+                except Exception:
+                    continue
+
+    # 再次嘗試 Noto (若使用者自行安裝於常見目錄)
+    if not chosen:
+        noto_dirs = [
+            os.path.expanduser(r"~/.local/share/fonts"),
+            os.path.expanduser(r"~/Library/Fonts"),
+            r"/usr/share/fonts", r"/usr/local/share/fonts"
+        ]
+        for d in noto_dirs:
+            if os.path.isdir(d):
+                for root, _, files in os.walk(d):
+                    for fn in files:
+                        if 'NotoSansCJK' in fn or 'SourceHanSans' in fn:
+                            try:
+                                font_manager.fontManager.addfont(os.path.join(root, fn))
+                            except Exception:
+                                pass
+        available = set(f.name for f in font_manager.fontManager.ttflist)
+        for fam in ["Noto Sans CJK SC", "Noto Sans CJK TC", "Source Han Sans CN", "Source Han Sans TW"]:
+            if fam in available:
+                chosen = fam
+                break
+
+    if not chosen:
+        # 最後 fallback 為 DejaVu Sans (支援部分 CJK 但不完整)
+        chosen = 'DejaVu Sans'
+
+    matplotlib.rcParams['font.family'] = chosen
+    matplotlib.rcParams['axes.unicode_minus'] = False
+    # 保留原始使用者設定的備選
+    matplotlib.rcParams['font.sans-serif'] = [chosen] + [f for f in test_families if f != chosen]
+    print(f"[Font] 使用中文字型: {chosen}")
+
+# 呼叫一次確保中文顯示
+ensure_chinese_font()
 
 # 解決中文顯示問題
 plt.rcParams['font.sans-serif'] = ['Microsoft YaHei', 'SimHei', 'DejaVu Sans', 'Arial Unicode MS']
@@ -106,38 +178,58 @@ def extract_object_roi(image, mask):
     
     return roi, bbox
 
-def compute_ncc(template, image):
-    """
-    計算標準化交叉相關 (Normalized Cross Correlation)
-    
+def compute_ncc(template, search_region):
+    """與 object_matching_ncc.py 保持一致的 NCC 計算函式。
+    計算模板與搜尋區域之間的正規化交叉相關 (NCC)。
+
     Args:
         template (numpy.ndarray): 模板影像
-        image (numpy.ndarray): 搜尋影像
-        
+        search_region (numpy.ndarray): 搜尋區域影像
+
     Returns:
-        tuple: (max_ncc_score, best_match_location)
+        tuple: (NCC值, 匹配位置) 若失敗則回傳 (0.0, (0,0))
     """
-    if template.size == 0 or image.size == 0:
-        return 0, (0, 0)
-    
     # 轉換為灰階
     if len(template.shape) == 3:
-        template_gray = cv2.cvtColor(template, cv2.COLOR_RGB2GRAY)
-    else:
-        template_gray = template
-        
-    if len(image.shape) == 3:
-        image_gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-    else:
-        image_gray = image
-    
-    # 執行模板匹配
-    result = cv2.matchTemplate(image_gray, template_gray, cv2.TM_CCOEFF_NORMED)
-    
-    # 找到最佳匹配位置
-    min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
-    
-    return max_val, max_loc
+        template = cv2.cvtColor(template, cv2.COLOR_RGB2GRAY)
+    if len(search_region.shape) == 3:
+        search_region = cv2.cvtColor(search_region, cv2.COLOR_RGB2GRAY)
+
+    # 檢查尺寸要求：模板必須小於或等於搜索區域，否則交換或縮放
+    template_h, template_w = template.shape
+    search_h, search_w = search_region.shape
+
+    # 如果模板比搜索區域大，交換
+    if template_h > search_h or template_w > search_w:
+        template, search_region = search_region, template
+        template_h, template_w = template.shape
+        search_h, search_w = search_region.shape
+
+    # 若仍不符合，縮放模板
+    if template_h > search_h or template_w > search_w:
+        scale_h = search_h / template_h if template_h > search_h else 1.0
+        scale_w = search_w / template_w if template_w > search_w else 1.0
+        scale = min(scale_h, scale_w, 1.0)
+        new_h = max(1, int(template_h * scale))
+        new_w = max(1, int(template_w * scale))
+        template = cv2.resize(template, (new_w, new_h))
+        template_h, template_w = template.shape
+
+    # 邊界與尺寸安全檢查
+    if template.size == 0 or search_region.size == 0:
+        return 0.0, (0, 0)
+    if template_h < 3 or template_w < 3:
+        return 0.0, (0, 0)
+    if search_h < 3 or search_w < 3:
+        return 0.0, (0, 0)
+
+    try:
+        result = cv2.matchTemplate(search_region, template, cv2.TM_CCOEFF_NORMED)
+        min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
+        return max_val, max_loc
+    except Exception as e:
+        print(f"    模板匹配異常: {e}")
+        return 0.0, (0, 0)
 
 def find_matching_shrimps(left_masks, right_masks, left_image, right_image, ncc_threshold=0.3):
     """
@@ -157,6 +249,8 @@ def find_matching_shrimps(left_masks, right_masks, left_image, right_image, ncc_
     
     print(f"尋找蝦子匹配: 左{len(left_masks)}隻, 右{len(right_masks)}隻")
     
+    used_right_indices = set()  # 追蹤已被配對的右蝦子索引，確保一對一
+
     for i, left_mask in enumerate(left_masks):
         # 提取左蝦子ROI
         left_roi, left_bbox = extract_object_roi(left_image, left_mask)
@@ -168,6 +262,8 @@ def find_matching_shrimps(left_masks, right_masks, left_image, right_image, ncc_
         
         # 在右影像中尋找最佳匹配
         for j, right_mask in enumerate(right_masks):
+            if j in used_right_indices:
+                continue  # 已經被配對，跳過
             # 提取右蝦子ROI
             right_roi, right_bbox = extract_object_roi(right_image, right_mask)
             if right_roi is None:
@@ -187,7 +283,15 @@ def find_matching_shrimps(left_masks, right_masks, left_image, right_image, ncc_
         
         if best_match:
             matches.append(best_match)
-            print(f"  ✓ 找到匹配: 左蝦子{i+1} (NCC = {best_ncc:.3f})")
+            # 找到對應右索引 (從 right_masks 中尋找同一物件的引用位置)
+            right_index = None
+            for idx_r, rm in enumerate(right_masks):
+                if rm is best_match[1]:
+                    right_index = idx_r
+                    break
+            if right_index is not None:
+                used_right_indices.add(right_index)
+            print(f"  ✓ 找到匹配: 左蝦子{i+1} → 右蝦子{(right_index+1) if right_index is not None else '?'} (NCC = {best_ncc:.3f})")
         else:
             print(f"  ✗ 未找到匹配: 左蝦子{i+1}")
     
@@ -220,6 +324,54 @@ def fit_quadratic_curve(x_points, y_points):
         return result.x
     except:
         return np.array([0, 0, np.mean(y_points)])
+
+# === 新增：與 shrimp_disparity_analysis 一致的多曲線擬合與最佳選擇 ===
+def fit_best_curve(x_points, y_points, curve_types=("linear","quadratic","cubic")):
+    """根據多種曲線型態擬合並選擇總距離最小者。
+    回傳 (best_type, params, detail_dict)
+    detail_dict: {curve_type: {params, total_distance, avg_distance}} 或 None
+    """
+    results = {}
+    best_type = None
+    best_sum = float('inf')
+    for ct in curve_types:
+        try:
+            params = rc_fit_optimal_curve(x_points, y_points, ct)
+            total_dist = rc_total_distance_to_curve(params, x_points, y_points, ct)
+            avg_dist = total_dist / max(1, len(x_points))
+            results[ct] = {
+                'params': params,
+                'total_distance': total_dist,
+                'avg_distance': avg_dist
+            }
+            if total_dist < best_sum:
+                best_sum = total_dist
+                best_type = ct
+        except Exception as e:
+            results[ct] = None
+    return best_type, (results[best_type]['params'] if best_type else None), results
+
+def eval_curve(params, x, curve_type):
+    """計算給定x的曲線y值。"""
+    if params is None:
+        return np.zeros_like(x)
+    if curve_type == 'linear':
+        a,b = params; return a*x + b
+    if curve_type == 'quadratic':
+        a,b,c = params; return a*x**2 + b*x + c
+    if curve_type == 'cubic':
+        a,b,c,d = params; return a*x**3 + b*x**2 + c*x + d
+    # fallback 二次
+    if len(params) == 3:
+        a,b,c = params; return a*x**2 + b*x + c
+    return np.zeros_like(x)
+
+def compute_disparity_points(left_x, left_y, right_x, right_y):
+    """依 shrimp_disparity_analysis 歐氏距離計算視差。"""
+    n = min(len(left_x), len(right_x))
+    lx = left_x[:n]; ly = left_y[:n]; rx = right_x[:n]; ry = right_y[:n]
+    disparities = np.sqrt((lx - rx)**2 + (ly - ry)**2)
+    return disparities
 
 def demonstrate_real_data_sampling():
     """演示使用真實蝦子資料的相對位置採樣"""
@@ -299,13 +451,30 @@ def demonstrate_real_data_sampling():
     print(f"\n左蝦子範圍: x=[{left_x_min}, {left_x_max}], y=[{left_y_min}, {left_y_max}]")
     print(f"右蝦子範圍: x=[{right_x_min}, {right_x_max}], y=[{right_y_min}, {right_y_max}]")
     
-    # 擬合二次曲線
-    print("\n5. 擬合蝦子曲線...")
-    left_params = fit_quadratic_curve(left_x, left_y)
-    right_params = fit_quadratic_curve(right_x, right_y)
-    
-    print(f"左蝦子曲線參數: a={left_params[0]:.6f}, b={left_params[1]:.3f}, c={left_params[2]:.1f}")
-    print(f"右蝦子曲線參數: a={right_params[0]:.6f}, b={right_params[1]:.3f}, c={right_params[2]:.1f}")
+    # 擬合多種曲線並選擇最佳
+    print("\n5. 擬合蝦子曲線 (linear/quadratic/cubic)...")
+    left_best_type, left_params, left_detail = fit_best_curve(left_x, left_y)
+    right_best_type, right_params, right_detail = fit_best_curve(right_x, right_y)
+    # 若左右最佳型態不同，使用總距離和最小的共同型態
+    common_best_type = None
+    min_sum = float('inf')
+    for ct in ['linear','quadratic','cubic']:
+        if left_detail.get(ct) and right_detail.get(ct):
+            sum_dist = left_detail[ct]['total_distance'] + right_detail[ct]['total_distance']
+            if sum_dist < min_sum:
+                min_sum = sum_dist
+                common_best_type = ct
+    if common_best_type is None:
+        # fallback 使用各自最佳的 (採樣仍以各自範圍 t) 但為一致性仍使用其自身最佳
+        common_best_type = left_best_type or right_best_type or 'quadratic'
+    # 重新採用共同型態參數 (若存在該型態擬合結果)
+    if left_detail.get(common_best_type):
+        left_params = left_detail[common_best_type]['params']
+    if right_detail.get(common_best_type):
+        right_params = right_detail[common_best_type]['params']
+    print(f"選擇共同曲線型態: {common_best_type}")
+    print(f"左曲線參數: {left_params}")
+    print(f"右曲線參數: {right_params}")
     print(f"蝦子匹配度 (NCC): {ncc_score:.3f}")
     
     # 設定採樣點數
@@ -350,36 +519,118 @@ def demonstrate_real_data_sampling():
     relative_left_x = left_x_min + t_values * (left_x_max - left_x_min)
     relative_right_x = right_x_min + t_values * (right_x_max - right_x_min)
     
-    # 計算對應的y座標
-    relative_left_y = left_params[0] * relative_left_x**2 + left_params[1] * relative_left_x + left_params[2]
-    relative_right_y = right_params[0] * relative_right_x**2 + right_params[1] * relative_right_x + right_params[2]
+    # 計算對應的y值 (使用共同曲線型態)
+    relative_left_y = eval_curve(left_params, relative_left_x, common_best_type)
+    relative_right_y = eval_curve(right_params, relative_right_x, common_best_type)
     
-    # 計算視差
-    relative_disparities = relative_left_x - relative_right_x
+    # 計算視差 (歐氏距離)
+    relative_disparities = compute_disparity_points(relative_left_x, relative_left_y, relative_right_x, relative_right_y)
     
     print("採樣結果（相對位置方法）：")
-    print("t值    左影像(x,y)      右影像(x,y)      視差    身體部位")
+    print("t值    左影像(x,y)      右影像(x,y)      視差(歐氏)    身體部位")
     print("-" * 65)
     body_parts = ["頭部", "前1/4", "中段", "後3/4", "尾部"]
     
     for i, (t, lx, ly, rx, ry, d) in enumerate(zip(t_values, relative_left_x, relative_left_y, 
                                                    relative_right_x, relative_right_y, relative_disparities)):
         part = body_parts[i] if i < len(body_parts) else f"第{i+1}點"
-        print(f"{t:.2f}   ({lx:6.1f},{ly:6.1f})   ({rx:6.1f},{ry:6.1f})   {d:6.1f}   {part}")
+    print(f"{t:.2f}   ({lx:6.1f},{ly:6.1f})   ({rx:6.1f},{ry:6.1f})   {d:8.2f}   {part}")
     
     print(f"\n平均視差: {np.mean(relative_disparities):.1f} 像素 ← 正確！")
     print(f"視差標準差: {np.std(relative_disparities):.1f} 像素")
-    
-    # 創建視覺化圖表
-    create_real_data_visualization(
-        left_image, right_image,
-        left_mask, right_mask,
-        left_x, left_y, right_x, right_y,
-        left_params, right_params,
-        relative_left_x, relative_left_y,
-        relative_right_x, relative_right_y,
-        relative_disparities, ncc_score
-    )
+
+    # 若有多個匹配，額外對全部匹配進行逐一輸出
+    if len(matches) > 1:
+        print("\n附加: 為每組匹配輸出個別採樣與視覺化...")
+        export_all_match_samples(left_image, right_image, matches)
+
+def export_all_match_samples(left_image, right_image, matches, n_points=5, export_dir='shrimp_disparity_analysis_results'):
+    """對每組匹配蝦子對進行相對位置採樣、視覺化與JSON輸出。
+
+    Args:
+        left_image (ndarray)
+        right_image (ndarray)
+        matches (list): (left_mask, right_mask, score) 形式
+        n_points (int): 採樣點數
+        export_dir (str): 匯出資料夾
+    """
+    os.makedirs(export_dir, exist_ok=True)
+    summary = []
+    for idx, (left_mask, right_mask, ncc_score) in enumerate(matches, start=1):
+        try:
+            left_x, left_y = get_mask_points(left_mask)
+            right_x, right_y = get_mask_points(right_mask)
+            # 多曲線擬合與共同型態選擇
+            left_best_type, _, left_detail = fit_best_curve(left_x, left_y)
+            right_best_type, _, right_detail = fit_best_curve(right_x, right_y)
+            common_best_type = None
+            min_sum = float('inf')
+            for ct in ['linear','quadratic','cubic']:
+                if left_detail.get(ct) and right_detail.get(ct):
+                    sum_dist = left_detail[ct]['total_distance'] + right_detail[ct]['total_distance']
+                    if sum_dist < min_sum:
+                        min_sum = sum_dist
+                        common_best_type = ct
+            if common_best_type is None:
+                common_best_type = left_best_type or right_best_type or 'quadratic'
+            left_params = left_detail[common_best_type]['params'] if left_detail.get(common_best_type) else None
+            right_params = right_detail[common_best_type]['params'] if right_detail.get(common_best_type) else None
+            # 範圍
+            left_x_min, left_x_max = left_x.min(), left_x.max()
+            right_x_min, right_x_max = right_x.min(), right_x.max()
+            # 相對採樣
+            t_values = np.linspace(0, 1, n_points)
+            sample_left_x = left_x_min + t_values * (left_x_max - left_x_min)
+            sample_right_x = right_x_min + t_values * (right_x_max - right_x_min)
+            sample_left_y = eval_curve(left_params, sample_left_x, common_best_type)
+            sample_right_y = eval_curve(right_params, sample_right_x, common_best_type)
+            disparities = compute_disparity_points(sample_left_x, sample_left_y, sample_right_x, sample_right_y)
+            avg_disp = float(np.mean(disparities))
+            std_disp = float(np.std(disparities))
+            # 視覺化檔名
+            fig_name = os.path.join(export_dir, f'match_{idx:02d}_sampling.png')
+            create_real_data_visualization(
+                left_image, right_image,
+                left_mask, right_mask,
+                left_x, left_y, right_x, right_y,
+                left_params, right_params,
+                sample_left_x, sample_left_y,
+                sample_right_x, sample_right_y,
+                disparities, ncc_score,
+                output_filename=fig_name,
+                curve_type=common_best_type,
+                show=False  # 批次輸出不顯示窗口
+            )
+            # JSON輸出
+            record = {
+                'match_index': idx,
+                'ncc_score': float(ncc_score),
+                'curve_type': common_best_type,
+                'left_curve_params': [float(x) for x in (left_params if left_params is not None else [])],
+                'right_curve_params': [float(x) for x in (right_params if right_params is not None else [])],
+                't_values': [float(t) for t in t_values],
+                'left_samples': [{'x': float(x), 'y': float(y)} for x, y in zip(sample_left_x, sample_left_y)],
+                'right_samples': [{'x': float(x), 'y': float(y)} for x, y in zip(sample_right_x, sample_right_y)],
+                'disparities': [float(d) for d in disparities],
+                'avg_disparity': avg_disp,
+                'std_disparity': std_disp,
+                'figure': fig_name
+            }
+            json_path = os.path.join(export_dir, f'match_{idx:02d}_sampling.json')
+            with open(json_path, 'w', encoding='utf-8') as f:
+                json.dump(record, f, ensure_ascii=False, indent=2)
+            print(f"  匹配 {idx}: 圖片與JSON輸出完成 (NCC={ncc_score:.3f})")
+            summary.append(record)
+        except Exception as e:
+            print(f"  匹配 {idx}: 產生輸出失敗 - {e}")
+    # 總結檔案
+    summary_path = os.path.join(export_dir, 'all_matches_sampling_summary.json')
+    try:
+        with open(summary_path, 'w', encoding='utf-8') as f:
+            json.dump({'total_matches': len(summary), 'matches': summary}, f, ensure_ascii=False, indent=2)
+        print(f"\n所有匹配採樣摘要儲存: {summary_path}")
+    except Exception as e:
+        print(f"摘要儲存失敗: {e}")
 
 def demonstrate_simulated_sampling():
     """回退到模擬資料的示例"""
@@ -455,8 +706,16 @@ def create_real_data_visualization(left_image, right_image,
                                    left_params, right_params,
                                    sample_left_x, sample_left_y,
                                    sample_right_x, sample_right_y,
-                                   disparities, ncc_score):
-    """創建使用真實蝦子資料的視覺化圖表"""
+                                   disparities, ncc_score,
+                                   output_filename='真實蝦子資料相對位置採樣示例.png',
+                                   curve_type=None,
+                                   show=True):
+    """創建使用真實蝦子資料的視覺化圖表
+
+    Args:
+        ... (其餘與原來相同) ...
+        output_filename (str): 儲存圖檔名稱
+    """
     
     plt.figure(figsize=(20, 12))
     
@@ -478,7 +737,8 @@ def create_real_data_visualization(left_image, right_image,
         plt.text(x+10, y-10, f'{i+1}', fontsize=12, color='white', weight='bold',
                 bbox=dict(boxstyle='round,pad=0.3', facecolor='red', alpha=0.8))
     
-    plt.title(f'左影像 - 蝦子遮罩和採樣點\n(匹配度 NCC = {ncc_score:.3f})', fontsize=14)
+    curve_note = f" | 曲線: {curve_type}" if curve_type else ""
+    plt.title(f'左影像 - 蝦子遮罩和採樣點\n(NCC={ncc_score:.3f}{curve_note})', fontsize=14)
     plt.axis('equal')
     plt.grid(True, alpha=0.3)
     
@@ -618,11 +878,11 @@ def create_real_data_visualization(left_image, right_image,
     plt.gca().invert_yaxis()
     
     plt.tight_layout()
-    output_filename = '真實蝦子資料相對位置採樣示例.png'
     plt.savefig(output_filename, dpi=300, bbox_inches='tight')
-    plt.show()
-    
-    print(f"\n真實資料視覺化圖表已儲存為: {output_filename}")
+    if show:
+        plt.show()
+    else:
+        plt.close()
 
 def create_visualization(left_x_min, left_x_max, right_x_min, right_x_max,
                         left_curve, right_curve,

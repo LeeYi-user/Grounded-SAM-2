@@ -3,7 +3,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 # 讀取圖像
-image = cv2.imread('vlcsnap-2025-08-07-08h23m25s110.png')
+image = cv2.imread(r'extracted_frames_left\frame_015314.jpg')
 
 # 將圖像從BGR轉為RGB顯示用
 image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)

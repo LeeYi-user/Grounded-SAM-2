@@ -9,12 +9,11 @@ from typing import Dict, Any, List
 def depth_from_disparity(disparity: float, baseline_cm: float = 25.0) -> float:
     """
     Compute depth (cm) from disparity using the provided formula:
-    depth = 1358.80552 * (baseline / 7.6) / disparity^0.4686624
+    depth = (baseline_cm / 7.6) * (0.96938468^(disparity - 172.87387593) + 19.6022959)
     """
     if disparity is None or disparity <= 0:
         raise ValueError("Disparity must be positive.")
-    K = 1358.80552 * (baseline_cm / 7.6)
-    return K / (disparity ** 0.4686624)
+    return (baseline_cm / 7.6) * (0.96938468**(disparity - 172.87387593) + 19.6022959)
 
 
 def compute_lengths_for_shrimp(entry: Dict[str, Any], baseline_cm: float = 25.0) -> Dict[str, Any]:

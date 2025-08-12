@@ -74,7 +74,7 @@ class ShrimpDisparityAnalyzer:
             json_path (str): JSON檔案路徑
             
         Returns:
-            tuple: (image, annotations_data)
+            tuple: (image, annotations_data, image_path)
         """
         # 讀取JSON檔案
         with open(json_path, 'r', encoding='utf-8') as f:
@@ -99,7 +99,7 @@ class ShrimpDisparityAnalyzer:
         # 轉換為RGB格式
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         
-        return image_rgb, data
+        return image_rgb, data, full_image_path
     
     def extract_object_roi(self, image, annotation):
         """
@@ -972,13 +972,14 @@ class ShrimpDisparityAnalyzer:
         print(f"蝦子 {shrimp_idx+1} 詳細分析已儲存: {detail_output_path}")
         plt.close()
     
-    def save_results_json(self, disparity_results, output_path):
+    def save_results_json(self, disparity_results, output_path, left_image_path=None):
         """
         儲存視差分析結果為JSON檔案
         
         Args:
             disparity_results (list): 視差分析結果
             output_path (str): 輸出檔案路徑
+            left_image_path (str): 左影像檔案路徑 (可選)
         """
         # 準備可序列化的資料
         serializable_results = []
@@ -1008,14 +1009,23 @@ class ShrimpDisparityAnalyzer:
             
             serializable_results.append(serializable_result)
         
+        # 準備輸出資料結構
+        output_data = {
+            'total_shrimps_analyzed': len(serializable_results),
+            'analysis_results': serializable_results
+        }
+        
+        # 如果有左影像路徑，將其加入結果中
+        if left_image_path:
+            output_data['left_image_path'] = left_image_path
+        
         # 儲存JSON檔案
         with open(output_path, 'w', encoding='utf-8') as f:
-            json.dump({
-                'total_shrimps_analyzed': len(serializable_results),
-                'analysis_results': serializable_results
-            }, f, indent=2, ensure_ascii=False)
+            json.dump(output_data, f, indent=2, ensure_ascii=False)
         
         print(f"視差分析結果JSON已儲存: {output_path}")
+        if left_image_path:
+            print(f"左影像路徑已記錄: {left_image_path}")
     
     def run_analysis(self, left_json_path, right_json_path, output_dir, n_points=10):
         """
@@ -1036,11 +1046,11 @@ class ShrimpDisparityAnalyzer:
             
             # 1. 載入左右影像和標註資料
             print("\n1. 載入左影像和標註資料...")
-            left_image, left_data = self.load_image_and_annotations(left_json_path)
+            left_image, left_data, left_image_path = self.load_image_and_annotations(left_json_path)
             print(f"   左影像尺寸: {left_image.shape}")
             
             print("\n2. 載入右影像和標註資料...")
-            right_image, right_data = self.load_image_and_annotations(right_json_path)
+            right_image, right_data, right_image_path = self.load_image_and_annotations(right_json_path)
             print(f"   右影像尺寸: {right_image.shape}")
             
             # 2. 執行蝦子匹配
@@ -1067,7 +1077,7 @@ class ShrimpDisparityAnalyzer:
             # 5. 儲存結果
             print("\n6. 儲存分析結果...")
             json_output_path = os.path.join(output_dir, 'shrimp_disparity_results.json')
-            self.save_results_json(disparity_results, json_output_path)
+            self.save_results_json(disparity_results, json_output_path, left_image_path)
             
             # 輸出摘要
             print("\n=== 分析結果摘要 ===")
